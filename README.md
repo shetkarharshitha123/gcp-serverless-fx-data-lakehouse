@@ -588,6 +588,3 @@ Detailed project documentation is available in the `docs/` directory:
 Built using Google Cloud Platform with a serverless Bronze-Silver-Gold data lakehouse architecture.
 
 ````
-
-
-
