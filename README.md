@@ -589,9 +589,5 @@ Built using Google Cloud Platform with a serverless Bronze-Silver-Gold data lake
 
 ````
 
-### Recommended GitHub repository
 
-```text
-📦 gcp-serverless-fx-data-lakehouse
-````
 
