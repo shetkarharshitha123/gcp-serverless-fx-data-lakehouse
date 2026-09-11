@@ -1,1 +1,9 @@
-
+  {
+  "BigQuery Schema": [
+    {"name": "base_currency", "type": "STRING", "mode": "NULLABLE"},
+    {"name": "target_currency", "type": "STRING", "mode": "NULLABLE"},
+    {"name": "exchange_rate", "type": "NUMERIC", "mode": "NULLABLE"},
+    {"name": "rate_date", "type": "DATE", "mode": "NULLABLE"},
+    {"name": "ingested_at", "type": "TIMESTAMP", "mode": "NULLABLE"}
+  ]
+}
