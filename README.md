@@ -1,67 +1,90 @@
-````markdown
 # Serverless FX Data Lakehouse on GCP
 
 A serverless Foreign Exchange (FX) data lakehouse pipeline built on Google Cloud Platform (GCP).
 
-The pipeline ingests USD-based foreign exchange rates from an external REST API, performs serverless ingestion and preprocessing using Google Cloud Functions, stores data across Bronze and Silver Cloud Storage layers, processes curated data using Google Cloud Dataflow, and loads validated records into a partitioned and clustered BigQuery Gold table.
+The pipeline ingests USD-based foreign exchange rates from an external REST API, performs serverless ingestion and preprocessing using Google Cloud Functions, stores raw and curated data in Google Cloud Storage (GCS), processes curated data using Google Cloud Dataflow, and loads validated records into a partitioned and clustered BigQuery Gold table.
 
-The pipeline is automated using Cloud Scheduler and follows a three-tier Medallion architecture: **Bronze → Silver → Gold**.
+The pipeline is automated using Cloud Scheduler and follows a three-tier Medallion architecture:
+
+**Bronze → Silver → Gold**
 
 ---
 
 ## Architecture
 
 ```text
-                 Open Exchange Rates API
-                          │
-                          ▼
-                 Cloud Functions 2nd Gen
-                  Python 3.11
-                          │
-                 ┌────────┴────────┐
-                 │                 │
-                 ▼                 ▼
-          GCS Bronze          GCS Silver
-           Raw JSON            JSONL
-                 │                 │
-                 │                 ▼
-                 │              Dataflow
-                 │           Apache Beam
-                 │                 │
-                 │                 ▼
-                 │           BigQuery Gold
-                 │                 │
-                 │                 ▼
-                 │       Analytics & Reporting
-                 │
-                 └─────────────────────────
+                    Open Exchange Rates API
+                              │
+                              ▼
+                    Cloud Functions 2nd Gen
+                         Python 3.11
+                              │
+                     ┌────────┴────────┐
+                     │                 │
+                     ▼                 ▼
+                GCS Bronze        GCS Silver
+                  Raw JSON          JSONL
+                                       │
+                                       ▼
+                                   Dataflow
+                                Apache Beam
+                                       │
+                                       ▼
+                                BigQuery Gold
+                                       │
+                                       ▼
+                              Analytics & Reporting
+
 
                     Cloud Scheduler
-                          │
-                          ▼
-                   Cloud Function
-                    Daily Trigger
-````
+                           │
+                           ▼
+                  HTTP + OIDC Authentication
+                           │
+                           ▼
+                  Cloud Functions 2nd Gen
+```
+
+Cloud Scheduler triggers the Cloud Function on a scheduled basis. The Cloud Function retrieves FX data from the external API and writes both Bronze and Silver data to Cloud Storage. Dataflow then processes the Silver JSONL files and loads the curated records into the BigQuery Gold table.
 
 ---
 
 ## Project Overview
 
-The pipeline is designed to implement a scalable **three-tier Medallion data architecture** for foreign exchange data.
+This project implements a scalable **three-tier Medallion data architecture** for foreign exchange data.
+
+The architecture separates raw ingestion, data curation, distributed processing, and analytical serving into independent layers.
 
 ### Bronze Layer
 
-Stores the original API payload in its raw JSON format.
+Stores the original API response in its raw JSON format.
+
+**Purpose:**
+
+* Preserve source data
+* Maintain the original API payload
+* Support reprocessing and troubleshooting
 
 ### Silver Layer
 
-Stores cleaned, standardized, and filtered exchange-rate records as JSONL.
+Stores cleaned, standardized, and filtered exchange-rate records in JSONL format.
+
+**Purpose:**
+
+* Remove unnecessary fields
+* Select required currencies
+* Standardize the data structure
+* Prepare data for downstream processing
 
 ### Gold Layer
 
-Stores validated analytical records in BigQuery for reporting and downstream analytics.
+Stores validated analytical records in BigQuery.
 
-The architecture separates raw ingestion, data curation, distributed processing, and analytical serving into independent layers. 
+**Purpose:**
+
+* Provide a trusted analytical dataset
+* Support reporting and downstream analytics
+* Optimize analytical queries using partitioning and clustering
 
 ---
 
@@ -72,7 +95,7 @@ The architecture separates raw ingestion, data curation, distributed processing,
 | Python 3.11             | Cloud Function runtime                 |
 | Open Exchange Rates API | External FX data source                |
 | Cloud Functions 2nd Gen | Serverless ingestion and preprocessing |
-| Cloud Storage           | Data lake storage                      |
+| Google Cloud Storage    | Data lake storage                      |
 | JSON / JSONL            | Raw and curated data formats           |
 | Google Cloud Dataflow   | Distributed batch processing           |
 | Apache Beam             | Data processing framework              |
@@ -86,36 +109,39 @@ The architecture separates raw ingestion, data curation, distributed processing,
 
 ```text
 External REST API
-       ↓
-Cloud Functions
-       ↓
- ┌─────┴──────┐
- ↓            ↓
-Bronze       Silver
- GCS          GCS
-Raw JSON     JSONL
-                ↓
-             Dataflow
-                ↓
-             BigQuery
-                ↓
-          Gold Analytics
+       │
+       ▼
+Cloud Functions 2nd Gen
+       │
+       ├──────────────────┐
+       ▼                  ▼
+GCS Bronze           GCS Silver
+Raw JSON              JSONL
+                           │
+                           ▼
+                       Dataflow
+                           │
+                    Schema Validation
+                           │
+                           ▼
+                      BigQuery
+                           │
+                           ▼
+                    Gold Analytics
 ```
 
 ### Processing Steps
 
-1. The Cloud Function calls the Open Exchange Rates API.
-2. The API returns USD-based exchange-rate data.
-3. The original response is stored in the Bronze GCS bucket.
-4. The Cloud Function selects and standardizes the required currency records.
-5. Cleaned records are written to the Silver GCS bucket in JSONL format.
-6. Dataflow reads the curated Silver files.
-7. Dataflow validates the records against the BigQuery schema.
-8. Validated records are loaded into the BigQuery Gold table.
-9. BigQuery provides the final analytical dataset.
-10. Cloud Scheduler triggers the ingestion process automatically.
-
-The documented Cloud Function writes both the raw Bronze data and the cleaned Silver data. 
+1. Cloud Scheduler triggers the Cloud Function.
+2. The Cloud Function calls the Open Exchange Rates API.
+3. The API returns USD-based exchange-rate data.
+4. The original API response is stored in the Bronze GCS bucket.
+5. The Cloud Function selects the required currencies and standardizes the required fields.
+6. The cleaned records are written to the Silver GCS bucket in JSONL format.
+7. Dataflow reads the curated Silver JSONL files.
+8. Dataflow processes and validates the records according to the configured schema.
+9. Validated records are loaded into the BigQuery Gold table.
+10. BigQuery provides the final analytical dataset for reporting and downstream analytics.
 
 ---
 
@@ -127,27 +153,30 @@ The documented Cloud Function writes both the raw Bronze data and the cleaned Si
 
 ```text
 Open Exchange Rates API
-          ↓
-    Cloud Function
-          ↓
+          │
+          ▼
+   Cloud Function
+          │
+          ▼
       GCS Bronze
-          ↓
+          │
+          ▼
        Raw JSON
 ```
 
-Bucket:
+**Bucket:**
 
 ```text
 it-prod-landing-as1-raw
 ```
 
-Raw files are stored under:
+**Object prefix:**
 
 ```text
 raw_events/
 ```
 
-The Bronze layer is intended to retain immutable source payloads so the data can be reprocessed if required. 
+The Bronze layer preserves the original source payload and provides a raw data layer that can be used for auditing, troubleshooting, and potential reprocessing.
 
 ---
 
@@ -156,26 +185,31 @@ The Bronze layer is intended to retain immutable source payloads so the data can
 **Purpose:** Store cleaned and standardized data suitable for downstream processing.
 
 ```text
-Bronze / API Data
-       ↓
+API Response
+     │
+     ▼
 Cloud Function
-       ↓
-Data Cleaning
-       ↓
-Currency Filtering
-       ↓
-JSONL
-       ↓
-GCS Silver
+     │
+     ├── Data Cleaning
+     │
+     ├── Currency Filtering
+     │
+     └── Field Standardization
+              │
+              ▼
+            JSONL
+              │
+              ▼
+         GCS Silver
 ```
 
-Bucket:
+**Bucket:**
 
 ```text
 it-prod-curated-as1-clean
 ```
 
-The Silver layer contains cleansed JSONL records with unnecessary fields removed and currency values standardized. 
+The Silver layer contains curated JSONL records with unnecessary fields removed and required currency values standardized.
 
 ---
 
@@ -185,27 +219,36 @@ The Silver layer contains cleansed JSONL records with unnecessary fields removed
 
 ```text
 Silver JSONL
-      ↓
-Dataflow
-      ↓
-BigQuery
-      ↓
+     │
+     ▼
+ Dataflow
+     │
+     ▼
+ BigQuery
+     │
+     ▼
 currency_rates_gold
 ```
 
-Table:
+**Dataset:**
 
 ```text
-analytics_lakehouse.currency_rates_gold
+analytics_lakehouse
 ```
 
-The Gold table is partitioned by `rate_date` and clustered by currency fields to improve analytical query performance. 
+**Table:**
+
+```text
+currency_rates_gold
+```
+
+The Gold table is partitioned by `rate_date` and clustered by currency fields to improve query performance for analytical workloads.
 
 ---
 
 ## Cloud Function
 
-### Function
+### Function Name
 
 ```text
 api-to-gcs-raw-ingestion
@@ -235,13 +278,14 @@ The Cloud Function:
 
 * Calls the external FX REST API
 * Retrieves exchange-rate data
-* Creates the raw Bronze payload
-* Filters required currencies
-* Creates curated Silver records
-* Writes JSON data to GCS
+* Preserves the original API response
+* Writes raw data to the Bronze layer
+* Filters the required currencies
+* Standardizes curated records
+* Writes JSONL data to the Silver layer
 * Adds ingestion metadata
 
-The documented implementation uses Cloud Functions 2nd Gen in `asia-south1`. 
+The Cloud Function is deployed using **Cloud Functions 2nd Gen** in the `asia-south1` region.
 
 ---
 
@@ -262,13 +306,13 @@ CNY
 AED
 ```
 
-Base currency:
+### Base Currency
 
 ```text
 USD
 ```
 
-The currency selection is defined in the project implementation. 
+The pipeline retrieves USD-based exchange rates and processes the configured target currencies.
 
 ---
 
@@ -292,17 +336,27 @@ Text Files on Cloud Storage to BigQuery (Batch)
 
 ```text
 GCS Silver
-    ↓
+    │
+    ▼
 JSONL Files
-    ↓
+    │
+    ▼
 Dataflow
-    ↓
+    │
+    ▼
 Schema Validation
-    ↓
-BigQuery
+    │
+    ▼
+BigQuery Gold
 ```
 
-Dataflow validates the curated files using `schema.json` before loading the records into BigQuery. 
+Dataflow reads the curated Silver JSONL files, processes the records, validates the expected structure, and loads the resulting records into BigQuery.
+
+The expected BigQuery schema is defined in:
+
+```text
+config/schema.json
+```
 
 ---
 
@@ -343,13 +397,15 @@ target_currency
 base_currency
 ```
 
-Partitioning reduces the amount of data scanned for date-based queries, while clustering improves filtering on currency columns.
+Partitioning by `rate_date` helps reduce the amount of data scanned for date-based queries.
+
+Clustering by `target_currency` and `base_currency` can improve query performance when filtering or grouping by currency fields.
 
 ---
 
 ## Schema Validation
 
-The Dataflow pipeline uses:
+The expected schema is defined in:
 
 ```text
 config/schema.json
@@ -365,17 +421,17 @@ rate_date        → DATE
 ingested_at      → TIMESTAMP
 ```
 
-This provides structural validation before data reaches the Gold layer.
+This provides a consistent structure for records before they are loaded into the Gold layer.
 
 ---
 
 ## Data Quality Checks
 
-The project includes SQL-based sanity checks for the Gold dataset.
+The project includes SQL-based sanity checks for the BigQuery Gold dataset.
 
 ### Volume Checks
 
-Validates:
+The checks validate:
 
 * Total record count
 * Distinct currencies
@@ -385,7 +441,7 @@ Validates:
 
 ### Null Checks
 
-Validates required fields such as:
+Required fields are checked for null values:
 
 ```text
 base_currency
@@ -396,7 +452,7 @@ rate_date
 
 ### Duplicate Checks
 
-Checks duplicate combinations of:
+Duplicate combinations are checked using:
 
 ```text
 rate_date
@@ -406,40 +462,49 @@ target_currency
 
 ### Currency Validation
 
-Validates that only the expected target currencies are present.
+The validation checks that only the expected target currencies are present.
 
 ### Date Validation
 
-Checks for:
+The checks validate:
 
 * Future dates
-* Invalid dates
+* Missing dates
 * Stale data
 * Chronological inconsistencies
 
-These checks are defined in the project's sanity-check documentation.   
+These checks help verify that the Gold dataset is complete, valid, and suitable for downstream analytics.
 
 ---
 
 ## Automation
 
-Cloud Scheduler is used to trigger the Cloud Function automatically.
+Cloud Scheduler is used to automate the pipeline.
 
 ```text
 Cloud Scheduler
-       ↓
+       │
+       ▼
 HTTP + OIDC Authentication
-       ↓
+       │
+       ▼
 Cloud Function
-       ↓
-Bronze + Silver
-       ↓
-Dataflow
-       ↓
-BigQuery Gold
+       │
+       ├───────────────┐
+       ▼               ▼
+GCS Bronze        GCS Silver
+Raw JSON            JSONL
+                       │
+                       ▼
+                   Dataflow
+                       │
+                       ▼
+                BigQuery Gold
 ```
 
-The documented design uses a daily Cloud Scheduler job with an HTTP trigger and OIDC authentication. 
+The pipeline uses a scheduled HTTP request authenticated using **OIDC** to invoke the Cloud Function.
+
+The current project configuration uses a **daily schedule**.
 
 ---
 
@@ -460,7 +525,7 @@ Cloud Function      : api-to-gcs-raw-ingestion
 Dataflow Job        : curated-to-gold-batch-load
 ```
 
-The bucket names and region are defined in the project implementation documentation. 
+> **Note:** If this repository is public, consider replacing environment-specific GCP identifiers with placeholders such as `<GCP_PROJECT_ID>` and `<BUCKET_NAME>`.
 
 ---
 
@@ -497,18 +562,18 @@ The bucket names and region are defined in the project implementation documentat
 └── 📄 LICENSE
 ```
 
-
+---
 
 ## Execution Order
 
 ```text
-1. Create GCS Bronze, Silver and Scratch buckets
+1. Create GCS Bronze, Silver, and Scratch buckets
                     ↓
 2. Create BigQuery dataset
                     ↓
 3. Create BigQuery Gold table
                     ↓
-4. Upload schema.json
+4. Configure the Dataflow schema
                     ↓
 5. Deploy Cloud Function
                     ↓
@@ -520,20 +585,22 @@ The bucket names and region are defined in the project implementation documentat
                     ↓
 9. Verify BigQuery Gold table
                     ↓
-10. Run sanity checks
+10. Run data quality / sanity checks
                     ↓
 11. Configure Cloud Scheduler
                     ↓
-12. Automate the pipeline
+12. Validate automated pipeline execution
 ```
 
-
+---
 
 ## Security
 
-The project uses Google Cloud IAM for access control and follows the principle of least privilege.
+The project uses **Google Cloud IAM** for access control and follows the principle of least privilege.
 
-Do not commit sensitive credentials to GitHub.
+### Security Guidelines
+
+Do not commit sensitive credentials or secrets to GitHub.
 
 Never upload:
 
@@ -546,7 +613,11 @@ Credentials
 Secret files
 ```
 
+Sensitive configuration such as API credentials should be supplied through appropriate secret or environment-variable mechanisms rather than hard-coded in source code.
 
+The Cloud Scheduler invocation should use authenticated requests with OIDC rather than an unauthenticated HTTP endpoint.
+
+---
 
 ## Key Technical Concepts
 
@@ -563,13 +634,13 @@ Secret files
 * BigQuery
 * Table partitioning
 * Table clustering
-* Data validation
+* Schema validation
 * Data quality checks
 * Cloud Scheduler
 * IAM
 * Serverless data lakehouse
 
-
+---
 
 ## Documentation
 
@@ -579,12 +650,12 @@ Detailed project documentation is available in the `docs/` directory:
 * **02 — Code Documentation**
 * **03 — Sanity Checks**
 
+These documents provide additional information about the architecture, implementation, code, and data quality validation.
+
 ---
 
 ## Project Status
 
 **Proof of Concept (POC)**
 
-Built using Google Cloud Platform with a serverless Bronze-Silver-Gold data lakehouse architecture.
-
-````
+This project demonstrates a serverless Bronze-Silver-Gold data lakehouse architecture on Google Cloud Platform using Cloud Functions, Cloud Storage, Dataflow, BigQuery, Cloud Scheduler, and IAM.
